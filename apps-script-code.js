@@ -2,12 +2,21 @@
 // https://script.google.com/u/0/home/projects/1sQJ6wxrm_WCSWz4XGNL0gGPwvLnkeTD6ARScqlyFmpIz2YTwYs8P61pU/edit
 
 var SPREADSHEET_ID = "10FJ11WGIItPOaLiZLTfHjkYZPHKqnZLnn-_1SrhJY2g";
+var SCHEDULE_SPREADSHEET_ID = "1sOyKqpxkh_QuVlDiUi1UWnBR3ML0lVNjb94N0KcXG2g";
 
 function doGet(e) {
   var action = e.parameter.action;
 
   if (action === "getSessions") {
     return getSessions();
+  }
+
+  if (action === "claimToken") {
+    return claimToken(e.parameter.sessionId, e.parameter.token, e.parameter.assistantId);
+  }
+
+  if (action === "getDailySchedule") {
+    return getDailyScheduleAction();
   }
 
   return ContentService.createTextOutput(JSON.stringify({ error: "Unknown action" }))
@@ -258,4 +267,145 @@ function updateSingleAttendance(data) {
 
   return ContentService.createTextOutput(JSON.stringify({ success: true }))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+function getDailyScheduleAction() {
+  try {
+    var ss = SpreadsheetApp.openById(SCHEDULE_SPREADSHEET_ID);
+    var sheets = ss.getSheets();
+    var today = new Date();
+    var todayDay = today.getDate();
+    var todayMonth = today.getMonth();
+
+    var MONTH_NAMES = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran",
+                       "Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+    var monthName = MONTH_NAMES[todayMonth];
+    var yearStr = String(today.getFullYear());
+    var dateSearch = todayDay + " " + monthName;
+
+    var sheet = null;
+    for (var i = 0; i < sheets.length; i++) {
+      var name = sheets[i].getName();
+      if (name.indexOf(monthName) >= 0) {
+        sheet = sheets[i];
+        if (name.indexOf(yearStr) >= 0) break;
+      }
+    }
+    if (!sheet) sheet = sheets[sheets.length - 1];
+
+    var data = sheet.getDataRange().getValues();
+    var todayCol = -1;
+    var dateRow = -1;
+
+    for (var r = 0; r < data.length; r++) {
+      for (var c = 0; c < data[r].length; c++) {
+        var cell = data[r][c];
+        if (cell instanceof Date) {
+          var d = new Date(cell);
+          d.setHours(0, 0, 0, 0);
+          var t2 = new Date(today);
+          t2.setHours(0, 0, 0, 0);
+          if (d.getTime() === t2.getTime()) {
+            todayCol = c;
+            dateRow = r;
+            break;
+          }
+        }
+        var cellStr = String(cell).trim();
+        if (cellStr === dateSearch || cellStr === todayDay + " " + monthName + " " + yearStr) {
+          todayCol = c;
+          dateRow = r;
+          break;
+        }
+      }
+      if (todayCol >= 0) break;
+    }
+
+    if (todayCol < 0) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: false, error: "today_not_found",
+        date: Utilities.formatDate(new Date(), "Europe/Istanbul", "dd.MM.yyyy"),
+        searchedFor: dateSearch, sheetName: sheet.getName()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    var assignments = [];
+    var blankCount = 0;
+    for (var r2 = dateRow + 1; r2 < Math.min(data.length, dateRow + 25); r2++) {
+      var cell2 = data[r2][todayCol];
+      if (!cell2 || String(cell2).trim() === "") {
+        blankCount++;
+        if (blankCount >= 3) break;
+        continue;
+      }
+      blankCount = 0;
+      assignments.push(String(cell2).trim());
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      date: Utilities.formatDate(new Date(), "Europe/Istanbul", "dd.MM.yyyy"),
+      assignments: assignments,
+      sheetName: sheet.getName()
+    })).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false, error: err.message
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function claimToken(sessionId, token, assistantId) {
+  if (!sessionId || !token || !assistantId) {
+    return ContentService.createTextOutput(JSON.stringify({ success: false, error: "missing_params" }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName("KullanilanTokenlar");
+    if (!sheet) {
+      sheet = ss.insertSheet("KullanilanTokenlar");
+      sheet.appendRow(["Token", "SessionID", "Zaman"]);
+      sheet.getRange(1, 1, 1, 3).setFontWeight("bold");
+    }
+
+    var key = sessionId + "_" + token + "_" + assistantId;
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][0] === key) {
+        lock.releaseLock();
+        return ContentService.createTextOutput(JSON.stringify({ success: false, error: "already_used" }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
+    sheet.appendRow([key, sessionId, new Date().toISOString()]);
+    lock.releaseLock();
+
+    var now = new Date().getTime();
+    var toDelete = [];
+    for (var j = data.length - 1; j >= 1; j--) {
+      if (data[j][2]) {
+        var tokenTime = new Date(data[j][2]).getTime();
+        if (now - tokenTime > 3600000) {
+          toDelete.push(j + 1);
+        }
+      }
+    }
+    for (var k = 0; k < toDelete.length; k++) {
+      sheet.deleteRow(toDelete[k]);
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({ success: true }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch(e) {
+    lock.releaseLock();
+    return ContentService.createTextOutput(JSON.stringify({ success: false, error: e.message }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
 }

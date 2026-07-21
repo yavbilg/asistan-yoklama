@@ -7,11 +7,38 @@ import { Session, getSessions, saveSession } from "@/lib/store";
 import { syncToGoogleSheets, saveSessionToCloud, loadSessionFromCloud } from "@/lib/sheets";
 import Link from "next/link";
 
+function formatDate(val: string): string {
+  if (!val) return val;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(val)) {
+    const d = new Date(val);
+    if (d.getFullYear() < 1900) {
+      return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+    }
+    return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
+  }
+  return val;
+}
+
+const ADMIN_PASSWORD = "SakaryaPsikiyatri";
+
 export default function YoklamaListePage() {
   const params = useParams();
   const sessionId = params.sessionId as string;
   const [session, setSession] = useState<Session | null>(null);
   const [filter, setFilter] = useState<"all" | "var" | "yok" | "muaf">("all");
+  const [unlocked, setUnlocked] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [passwordError, setPasswordError] = useState(false);
+
+  const handleUnlock = () => {
+    if (passwordInput === ADMIN_PASSWORD) {
+      setUnlocked(true);
+      setPasswordError(false);
+      setPasswordInput("");
+    } else {
+      setPasswordError(true);
+    }
+  };
 
   useEffect(() => {
     refreshSession();
@@ -129,7 +156,7 @@ export default function YoklamaListePage() {
             {session.lessonName}
           </h1>
           <p className="text-gray-500">
-            {session.date} | {session.startTime} - {session.endTime}
+            {formatDate(session.date)} | {formatDate(session.startTime)} - {formatDate(session.endTime)}
             {session.active && (
               <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
                 Aktif
@@ -182,6 +209,49 @@ export default function YoklamaListePage() {
         </button>
       </div>
 
+      {session.active && !unlocked && (
+        <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+          <p className="text-sm text-yellow-800 font-medium mb-3">
+            Yoklama islemleri icin sifre gereklidir
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={passwordInput}
+              onChange={(e) => {
+                setPasswordInput(e.target.value);
+                setPasswordError(false);
+              }}
+              onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
+              placeholder="Sifre giriniz"
+              className={`border rounded-lg px-3 py-2 text-sm flex-1 text-gray-900 ${
+                passwordError ? "border-red-400 bg-red-50" : ""
+              }`}
+            />
+            <button
+              onClick={handleUnlock}
+              className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 text-sm font-medium"
+            >
+              Kilidi Ac
+            </button>
+          </div>
+          {passwordError && (
+            <p className="text-xs text-red-600 mt-1">Yanlis sifre</p>
+          )}
+        </div>
+      )}
+
+      {session.active && unlocked && (
+        <div className="mb-4 flex justify-end">
+          <button
+            onClick={() => setUnlocked(false)}
+            className="text-xs text-gray-500 hover:text-gray-700 underline"
+          >
+            Kilitle
+          </button>
+        </div>
+      )}
+
       <div className="bg-white rounded-xl border overflow-hidden">
         <table className="w-full">
           <thead className="bg-gray-50 border-b">
@@ -201,7 +271,7 @@ export default function YoklamaListePage() {
               <th className="text-left px-4 py-3 text-sm font-semibold text-gray-700 hidden sm:table-cell">
                 Saat
               </th>
-              {session.active && (
+              {session.active && unlocked && (
                 <th className="text-center px-4 py-3 text-sm font-semibold text-gray-700">
                   Islem
                 </th>
@@ -245,7 +315,7 @@ export default function YoklamaListePage() {
                   <td className="px-4 py-3 text-sm text-gray-500 hidden sm:table-cell">
                     {record.timestamp || "-"}
                   </td>
-                  {session.active && (
+                  {session.active && unlocked && (
                     <td className="px-4 py-3 text-center">
                       <div className="flex gap-1 justify-center">
                         <button

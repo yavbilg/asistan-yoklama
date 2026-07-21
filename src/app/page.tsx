@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { assistants, CURRENT_WORK_LOCATIONS, isExempt } from "@/lib/assistants";
+import { assistants, STATIC_EXEMPT, parseScheduleAssignments, isExempt, getSeniorAssistantIds } from "@/lib/assistants";
 import {
   Session,
   getSessions,
@@ -12,7 +12,19 @@ import {
   generateSessionId,
 } from "@/lib/store";
 import { getTodaysLessons, getDayName, type ScheduledLesson } from "@/lib/schedule";
-import { saveSessionToCloud, loadSessionsFromCloud } from "@/lib/sheets";
+import { saveSessionToCloud, loadSessionsFromCloud, loadDailySchedule } from "@/lib/sheets";
+
+function formatDate(val: string): string {
+  if (!val) return val;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(val)) {
+    const d = new Date(val);
+    if (d.getFullYear() < 1900) {
+      return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+    }
+    return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
+  }
+  return val;
+}
 
 export default function AdminPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -60,12 +72,22 @@ export default function AdminPage() {
     setActiveSession(getActiveSession());
   };
 
-  const createSessionWith = (name: string, start: string, end: string) => {
+  const createSessionWith = async (name: string, start: string, end: string) => {
     if (!name.trim()) return;
 
     deactivateAllSessions();
 
-    const today = new Date().toISOString().split("T")[0];
+    const dailyCells = await loadDailySchedule();
+    const dynamicExempt = parseScheduleAssignments(dailyCells);
+    const seniorIds = getSeniorAssistantIds();
+    const seniorExempt: Record<number, string> = {};
+    for (const id of seniorIds) {
+      seniorExempt[id] = "Kıdemli";
+    }
+    const allExempt = { ...seniorExempt, ...STATIC_EXEMPT, ...dynamicExempt };
+
+    const now = new Date();
+    const today = `${String(now.getDate()).padStart(2, "0")}.${String(now.getMonth() + 1).padStart(2, "0")}.${now.getFullYear()}`;
     const newSession: Session = {
       id: generateSessionId(),
       lessonName: name.trim(),
@@ -75,7 +97,7 @@ export default function AdminPage() {
       createdAt: new Date().toISOString(),
       active: true,
       attendance: assistants.map((a) => {
-        const workLocation = CURRENT_WORK_LOCATIONS[a.id];
+        const workLocation = allExempt[a.id];
         if (workLocation && isExempt(workLocation)) {
           return {
             assistantId: a.id,
@@ -105,7 +127,8 @@ export default function AdminPage() {
   };
 
   const isLessonAlreadyStarted = (lesson: ScheduledLesson) => {
-    const today = new Date().toISOString().split("T")[0];
+    const n = new Date();
+    const today = `${String(n.getDate()).padStart(2, "0")}.${String(n.getMonth() + 1).padStart(2, "0")}.${n.getFullYear()}`;
     return sessions.some(
       (s) =>
         s.date === today &&
@@ -176,8 +199,8 @@ export default function AdminPage() {
                 {activeSession.lessonName}
               </h2>
               <p className="text-gray-600">
-                {activeSession.date} | {activeSession.startTime} -{" "}
-                {activeSession.endTime}
+                {formatDate(activeSession.date)} | {formatDate(activeSession.startTime)} -{" "}
+                {formatDate(activeSession.endTime)}
               </p>
             </div>
             <div className="flex gap-2 flex-wrap">
@@ -357,6 +380,11 @@ export default function AdminPage() {
         ) : (
           <div className="space-y-3">
             {[...sessions]
+              .filter((s) => {
+                const created = new Date(s.createdAt).getTime();
+                const fourDaysAgo = Date.now() - 4 * 24 * 60 * 60 * 1000;
+                return created >= fourDaysAgo;
+              })
               .sort(
                 (a, b) =>
                   new Date(b.createdAt).getTime() -
@@ -379,7 +407,7 @@ export default function AdminPage() {
                         )}
                       </h3>
                       <p className="text-sm text-gray-500">
-                        {session.date} | {session.startTime}-{session.endTime} |
+                        {formatDate(session.date)} | {formatDate(session.startTime)}-{formatDate(session.endTime)} |
                         Var: {stats.present} Yok: {stats.absent} Muaf:{" "}
                         {stats.exempt}
                       </p>

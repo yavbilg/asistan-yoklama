@@ -3,8 +3,8 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { assistants, WORK_LOCATIONS, CURRENT_WORK_LOCATIONS, isExempt } from "@/lib/assistants";
-
-import { updateAttendanceInCloud } from "@/lib/sheets";
+import { validateToken } from "@/lib/token";
+import { updateAttendanceInCloud, claimTokenFromCloud } from "@/lib/sheets";
 
 const APPS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbx_ysXd0y-IsFSEq-_MtPLzPjZi6Mv7GecY_PXjMdHnZMzqOQLLWSjcUNq2iS_njMg5/exec";
@@ -73,6 +73,7 @@ function KatilimContent() {
   const date = searchParams.get("d");
   const startTime = searchParams.get("st");
   const endTime = searchParams.get("et");
+  const token = searchParams.get("t");
 
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [selectedAssistant, setSelectedAssistant] = useState<number | null>(null);
@@ -80,9 +81,14 @@ function KatilimContent() {
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [showExemptForm, setShowExemptForm] = useState(false);
   const [submittedName, setSubmittedName] = useState<string | null>(null);
+  const [tokenExpired, setTokenExpired] = useState(false);
 
   useEffect(() => {
     if (!sessionId) return;
+    if (!token || !validateToken(sessionId, token)) {
+      setTokenExpired(true);
+      return;
+    }
     const doneKey = `yoklama_done_${sessionId}`;
     const alreadyDone = localStorage.getItem(doneKey);
     if (alreadyDone) {
@@ -107,56 +113,59 @@ function KatilimContent() {
     }
   };
 
-  const markPresent = (assistantId: number) => {
+  const claimAndProceed = async (assistantId: number, status: "var" | "muaf", location?: string) => {
+    if (!sessionId || !token) return;
+    setMessage({ type: "success", text: "Dogrulaniyor..." });
+    const result = await claimTokenFromCloud(sessionId, token, assistantId);
+    if (!result.success) {
+      if (result.error === "already_used") {
+        setMessage({ type: "error", text: "Bu QR kod baskasi tarafindan kullanildi. Ekrandan yeni QR okutun." });
+      } else {
+        setMessage({ type: "error", text: "Baglanti hatasi. Tekrar deneyin." });
+      }
+      setSelectedAssistant(null);
+      setShowExemptForm(false);
+      return;
+    }
+
     const updated = [...attendance];
     const record = updated.find((a) => a.assistantId === assistantId);
+    const ts = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
     if (record) {
-      record.status = "var";
-      record.timestamp = new Date().toLocaleTimeString("tr-TR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+      record.status = status;
+      record.timestamp = ts;
+      if (location) record.workLocation = location;
     }
     saveAttendance(updated);
     if (lessonName && date && startTime && endTime) {
       sendToSheets(lessonName, date, startTime, endTime, updated);
     }
-    const ts = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
-    if (sessionId) {
-      updateAttendanceInCloud(sessionId, assistantId, "var", "", ts);
-    }
+    updateAttendanceInCloud(sessionId, assistantId, status, location || "", ts);
     const name = assistants.find((a) => a.id === assistantId)?.name || "";
-    if (sessionId) {
-      localStorage.setItem(`yoklama_done_${sessionId}`, name);
-    }
+    localStorage.setItem(`yoklama_done_${sessionId}`, name);
     setSubmittedName(name);
   };
 
-  const markExempt = (assistantId: number, location: string) => {
-    const updated = [...attendance];
-    const record = updated.find((a) => a.assistantId === assistantId);
-    if (record) {
-      record.status = "muaf";
-      record.workLocation = location;
-      record.timestamp = new Date().toLocaleTimeString("tr-TR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    }
-    saveAttendance(updated);
-    if (lessonName && date && startTime && endTime) {
-      sendToSheets(lessonName, date, startTime, endTime, updated);
-    }
-    const ts = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
-    if (sessionId) {
-      updateAttendanceInCloud(sessionId, assistantId, "muaf", location, ts);
-    }
-    const name = assistants.find((a) => a.id === assistantId)?.name || "";
-    if (sessionId) {
-      localStorage.setItem(`yoklama_done_${sessionId}`, name);
-    }
-    setSubmittedName(name);
+  const markPresent = (assistantId: number) => {
+    claimAndProceed(assistantId, "var");
   };
+
+  const markExempt = (assistantId: number, location: string) => {
+    claimAndProceed(assistantId, "muaf", location);
+  };
+
+  if (tokenExpired) {
+    return (
+      <div className="max-w-lg mx-auto p-4 min-h-screen bg-gray-50 flex flex-col items-center justify-center">
+        <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-8 text-center w-full">
+          <div className="text-5xl mb-4">&#x23F0;</div>
+          <h1 className="text-2xl font-bold text-red-800 mb-2">QR Kod Suresi Doldu</h1>
+          <p className="text-red-600 mb-4">Bu QR kod artik gecersiz.</p>
+          <p className="text-gray-500 text-sm">Siniftaki ekrandan guncel QR kodu tekrar okutun.</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!sessionId || !lessonName || !date || !startTime || !endTime) {
     return (

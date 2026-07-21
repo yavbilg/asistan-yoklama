@@ -68,6 +68,8 @@ export const WORK_LOCATIONS = [
   "S.-AMATEM",
   "İzin/Rapor",
   "Nöbet",
+  "Nöbet Ertesi",
+  "Kıdemli",
 ] as const;
 
 export type WorkLocation = (typeof WORK_LOCATIONS)[number];
@@ -79,34 +81,148 @@ export const EXEMPT_LOCATIONS: WorkLocation[] = [
   "R-Nöroloji",
   "TRSM",
   "Çoc. Psikiyatrisi",
+  "Pol-AMATEM",
+  "Nöbet",
+  "Nöbet Ertesi",
+  "İzin/Rapor",
+  "Kıdemli",
 ];
 
 export function isExempt(location: WorkLocation | string): boolean {
   return EXEMPT_LOCATIONS.includes(location as WorkLocation);
 }
 
-// Temmuz 2026 çalışma yeri haritası (Google Sheets'ten alındı)
-export const CURRENT_WORK_LOCATIONS: Record<number, WorkLocation> = {
-  1: "TRSM",             // Bülbül Aliyeva
-  3: "Asker/Adli",       // Cengizhan Yener
-  4: "Poliklinik",       // Hasancan Başkurt
-  5: "TRSM",             // Çağdaş İsahan Erün
-  6: "Poliklinik",       // Cüneyt Yüksel
-  11: "Asker/Adli",      // Jehan Shukraan Khudhur
-  14: "R-Nöroloji",      // Ebrar Özhan
-  15: "Asker/Adli",      // Aysu Eseler
-  17: "R-Nöroloji",      // Mustafa Güney
-  18: "Poliklinik",      // Alphan Derici
-  19: "Asker/Adli",      // Fatma Betül Can
-  20: "Çoc. Psikiyatrisi", // Fuad Mammadlı
-  21: "Poliklinik",      // Merve Özçiftci
-  22: "Poliklinik",      // Özge Varol
-  26: "Konsültasyon",    // Şenay Taşkın
-  27: "Poliklinik",      // Gökhan Çınar
-  28: "Asker/Adli",      // İlkay Emre Çodur
-  29: "Poliklinik",      // İrem Elgörmüş Zafer
-  30: "Poliklinik",      // Cansu Kalelioğlu
-  32: "Poliklinik",      // İclal Karacan Öztürk
-  33: "Çoc. Psikiyatrisi", // Arzu Gür
-  34: "Konsültasyon",    // Yasin Gürleyen
+export function getSeniorAssistantIds(): number[] {
+  const now = new Date();
+  const ids: number[] = [];
+  for (const a of assistants) {
+    const parts = a.endDate.split(".");
+    if (parts.length !== 3) continue;
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const year = 2000 + parseInt(parts[2], 10);
+    const start = new Date(year, month, day);
+    const diffMs = now.getTime() - start.getTime();
+    const diffMonths = diffMs / (1000 * 60 * 60 * 24 * 30.44);
+    if (diffMonths > 42) {
+      ids.push(a.id);
+    }
+  }
+  return ids;
+}
+
+export const STATIC_EXEMPT: Record<number, WorkLocation> = {
+  14: "Çoc. Psikiyatrisi",
+  17: "Çoc. Psikiyatrisi",
+  29: "Çoc. Psikiyatrisi",
+  33: "Çoc. Psikiyatrisi",
 };
+
+// Günlük programdaki kısa isimler -> asistan ID eşleştirmesi
+export const SCHEDULE_NAME_MAP: Record<string, number> = {
+  "BÜLBÜL": 1,
+  "AFRA": 2,
+  "CENGİZHAN": 3,
+  "HASANCAN": 4,
+  "ÇAĞDAŞ": 5,
+  "CÜNEYT": 6,
+  "HALİSE": 7,
+  "CEREN": 9,
+  "RUMEYSA": 10,
+  "RÜMEYSA": 10,
+  "JEHAN": 11,
+  "ATAKAN": 12,
+  "MEHTAP": 13,
+  "EBRAR": 14,
+  "AYSU": 15,
+  "DEMİR": 16,
+  "MUSTAFA": 17,
+  "ALPHAN": 18,
+  "FUAD": 20,
+  "MERVE": 21,
+  "ÖZGE": 22,
+  "ARTUN": 23,
+  "YÖRE": 24,
+  "SENA": 25,
+  "ŞENAY": 26,
+  "GÖKHAN": 27,
+  "İLKAY": 28,
+  "CANSU": 30,
+  "EKİN": 31,
+  "İCLAL": 32,
+  "ARZU": 33,
+  "YASİN": 34,
+  "GİZEM": 35,
+  "BETÜL": 35,
+  "BERKAN": 36,
+  "NİSA": 37,
+  "HÜMEYRA": 38,
+  "SEMA": 39,
+  "KÜBRANUR": 40,
+  "KÜBRA": 40,
+  "NİDA": 41,
+  "FERİDE": 43,
+  "SÜMEYYE": 44,
+  "SEMİH": 45,
+  "İHLAS": 46,
+  "NAZLI": 47,
+  "RABİA": 48,
+};
+
+export function parseScheduleAssignments(cells: string[]): Record<number, WorkLocation> {
+  const result: Record<number, WorkLocation> = {};
+
+  for (const raw of cells) {
+    const text = raw.trim();
+    if (!text) continue;
+
+    let location: WorkLocation | null = null;
+    let namesPart = "";
+    const upper = text.toUpperCase();
+
+    if (upper.startsWith("N.E")) {
+      location = "Nöbet";
+      namesPart = text.replace(/^N\.E\.?\s*:?\s*/i, "");
+    } else if (upper.startsWith("İZİN")) {
+      location = "İzin/Rapor";
+      namesPart = text.replace(/^İZİN\s*:?\s*/i, "");
+    } else if (upper.indexOf("ADLİ") >= 0) {
+      location = "Asker/Adli";
+      namesPart = text.replace(/^.*?:\s*/, "");
+    } else if (upper.indexOf("AMATEM") >= 0) {
+      location = "Pol-AMATEM";
+      namesPart = text.replace(/^.*?:\s*/, "");
+    } else if (upper.indexOf("MERKEZ KONS") >= 0) {
+      location = "Konsültasyon";
+      namesPart = text.replace(/^.*?:\s*/, "");
+    } else if (upper.indexOf("KORUCUK KONS") >= 0) {
+      location = "Konsültasyon";
+      namesPart = text.replace(/^.*?:\s*/, "");
+    } else if (upper.indexOf("TRSM") >= 0) {
+      location = "TRSM";
+      const afterTrsm = text.replace(/^.*TRSM\s*:?\s*/i, "");
+      namesPart = afterTrsm;
+    } else if (/ATİLA|ALİ H|ESRA H|YAVUZ/i.test(upper)) {
+      location = "Poliklinik";
+      namesPart = text.replace(/^.*?:\s*/, "");
+    } else {
+      continue;
+    }
+
+    if (!location || !namesPart) continue;
+
+    const names = namesPart.split(/[\s,]+/).filter((n) => n.length > 1);
+    for (const name of names) {
+      const normalized = name.toUpperCase().replace(/[()]/g, "");
+      const id = SCHEDULE_NAME_MAP[normalized];
+      if (id && id > 0) {
+        result[id] = location;
+      }
+    }
+  }
+
+  return result;
+}
+
+// Geriye uyumluluk için CURRENT_WORK_LOCATIONS (statik muaf + boş)
+export const CURRENT_WORK_LOCATIONS: Record<number, WorkLocation> = { ...STATIC_EXEMPT };
