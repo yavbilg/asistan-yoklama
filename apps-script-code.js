@@ -132,6 +132,35 @@ function saveSessionData(session) {
     ]);
   }
 
+  // Yoklama sayfasini da guncelle
+  try {
+    var attendanceForSheet = [];
+    for (var a = 0; a < session.attendance.length; a++) {
+      var att = session.attendance[a];
+      var name = "";
+      if (att.assistantId && att.assistantId > 0 && att.assistantId <= ALL_ASSISTANTS.length) {
+        name = ALL_ASSISTANTS[att.assistantId - 1];
+      }
+      if (!name) continue;
+      var statusText = att.status === "var" ? "VAR" : att.status === "muaf" ? "MUAF" : "YOK";
+      if (statusText === "MUAF" && att.workLocation) {
+        statusText = "MUAF (" + att.workLocation + ")";
+      }
+      attendanceForSheet.push({ name: name, status: statusText, workLocation: att.workLocation || "", timestamp: att.timestamp || "" });
+    }
+    if (attendanceForSheet.length > 0) {
+      saveAttendanceData({
+        date: session.date,
+        lessonName: session.lessonName,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        attendance: attendanceForSheet
+      });
+    }
+  } catch(e) {
+    // Yoklama sayfasi hatasi oturum kaydini engellemesin
+  }
+
   return ContentService.createTextOutput(JSON.stringify({ success: true }))
     .setMimeType(ContentService.MimeType.JSON);
 }
@@ -152,11 +181,20 @@ var ALL_ASSISTANTS = [
   "Semih Gezmişoğlu","Hatice İhlas Ekinci","Nazlı Nehir","Rabia Nur Berta"
 ];
 
+function formatTime(val) {
+  if (val instanceof Date) {
+    var h = val.getHours();
+    var m = val.getMinutes();
+    return (h < 10 ? "0" + h : h) + ":" + (m < 10 ? "0" + m : m);
+  }
+  return String(val);
+}
+
 function saveAttendanceData(data) {
   var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName("Yoklama");
 
-  var headerText = data.date + "\n" + data.lessonName + "\n" + data.startTime + "-" + data.endTime;
+  var headerText = data.lessonName + " " + formatTime(data.startTime) + "-" + formatTime(data.endTime);
 
   if (!sheet) {
     sheet = ss.insertSheet("Yoklama");
@@ -211,6 +249,9 @@ function saveAttendanceData(data) {
     var statusText = a.status;
     if (a.status === "MUAF" && a.workLocation) {
       statusText = "MUAF (" + a.workLocation + ")";
+    }
+    if (a.timestamp && a.status !== "MUAF") {
+      statusText += " " + a.timestamp;
     }
     sheet.getRange(rowIdx, colIndex).setValue(statusText);
   }

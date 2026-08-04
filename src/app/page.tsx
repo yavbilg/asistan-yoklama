@@ -12,7 +12,7 @@ import {
   generateSessionId,
 } from "@/lib/store";
 import { getTodaysLessons, getDayName, type ScheduledLesson } from "@/lib/schedule";
-import { saveSessionToCloud, loadSessionsFromCloud, loadDailySchedule } from "@/lib/sheets";
+import { syncToGoogleSheets, saveSessionToCloud, loadSessionsFromCloud, loadDailySchedule } from "@/lib/sheets";
 
 function formatDate(val: string): string {
   if (!val) return val;
@@ -115,6 +115,7 @@ export default function AdminPage() {
 
     saveSession(newSession);
     saveSessionToCloud(newSession);
+    syncToGoogleSheets(newSession);
     setShowNewSession(false);
     setLessonName("");
     refreshData();
