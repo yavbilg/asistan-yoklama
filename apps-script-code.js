@@ -35,9 +35,25 @@ function getSessions() {
   var data = sheet.getDataRange().getValues();
   var sessions = [];
 
+  var now = new Date();
+  now.setHours(0, 0, 0, 0);
+  var cutoffTime = now.getTime() - 4 * 24 * 60 * 60 * 1000;
+
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
     if (!row[0]) continue;
+
+    var rowDate = null;
+    if (row[2] instanceof Date) {
+      rowDate = row[2];
+    } else {
+      var dateStr = String(row[2]);
+      var parts = dateStr.split(".");
+      if (parts.length === 3) {
+        rowDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+      }
+    }
+    if (rowDate && rowDate.getTime() < cutoffTime) continue;
 
     try {
       var sessionData = JSON.parse(row[6] || "{}");
