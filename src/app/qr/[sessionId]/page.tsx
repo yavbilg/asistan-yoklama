@@ -2,59 +2,71 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { Session, getSessions } from "@/lib/store";
-import { generateToken, getSecondsRemaining } from "@/lib/token";
 import Link from "next/link";
 import QRCode from "qrcode";
-
-function formatDate(val: string): string {
-  if (!val) return val;
-  if (/^\d{4}-\d{2}-\d{2}T/.test(val)) {
-    const d = new Date(val);
-    if (d.getFullYear() < 1900) {
-      return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
-    }
-    return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
-  }
-  return val;
-}
+import { Session, fetchSession, fetchToken, trTarih } from "@/lib/api";
 
 export default function QRPage() {
   const params = useParams();
   const sessionId = params.sessionId as string;
+
   const [session, setSession] = useState<Session | null>(null);
   const [qrUrl, setQrUrl] = useState("");
-  const [countdown, setCountdown] = useState(20);
+  const [countdown, setCountdown] = useState(0);
+  const [hata, setHata] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    const sessions = getSessions();
-    const found = sessions.find((s) => s.id === sessionId);
-    if (found) setSession(found);
+    let iptal = false;
+    (async () => {
+      try {
+        const s = await fetchSession(sessionId);
+        if (!iptal) setSession(s);
+      } catch (e) {
+        if (!iptal) setHata(e instanceof Error ? e.message : "Oturum bulunamadı.");
+      }
+    })();
+    // Sayfa kapanırsa geç gelen yanıt state'e yazılmasın.
+    return () => {
+      iptal = true;
+    };
   }, [sessionId]);
 
-  const refreshQR = useCallback(() => {
-    if (!session) return;
-    const token = generateToken(session.id);
-    const baseUrl = "https://asistan-yoklama.vercel.app";
-    const qp = new URLSearchParams({
-      s: session.id,
-      l: session.lessonName,
-      d: session.date,
-      st: session.startTime,
-      et: session.endTime,
-      t: token,
-    });
-    setQrUrl(`${baseUrl}/katilim?${qp.toString()}`);
-    setCountdown(getSecondsRemaining());
-  }, [session]);
+  /** Token sunucudan alınır; imzalama anahtarı tarayıcıya inmez. */
+  const qrYenile = useCallback(async () => {
+    try {
+      const { token, secondsRemaining } = await fetchToken(sessionId);
+      // Sabit adres yerine bulunduğumuz kök: yerelde de, yayında da çalışır.
+      const qp = new URLSearchParams({ s: sessionId, t: token });
+      setQrUrl(`${window.location.origin}/katilim?${qp.toString()}`);
+      setCountdown(secondsRemaining);
+      setHata("");
+    } catch (e) {
+      setHata(e instanceof Error ? e.message : "QR kod alınamadı.");
+    }
+  }, [sessionId]);
 
+  // Oturum gelince ilk token alınır, sonra saniye başı geri sayım işler ve
+  // sayaç bitince yeni token çekilir.
   useEffect(() => {
     if (!session) return;
-    refreshQR();
-    const interval = setInterval(refreshQR, 1000);
-    return () => clearInterval(interval);
-  }, [session, refreshQR]);
+
+    const ilk = setTimeout(qrYenile, 0);
+    const sayac = setInterval(() => {
+      setCountdown((s) => {
+        if (s <= 1) {
+          qrYenile();
+          return 40;
+        }
+        return s - 1;
+      });
+    }, 1000);
+
+    return () => {
+      clearTimeout(ilk);
+      clearInterval(sayac);
+    };
+  }, [session, qrYenile]);
 
   useEffect(() => {
     if (!qrUrl || !canvasRef.current) return;
@@ -65,31 +77,28 @@ export default function QRPage() {
     });
   }, [qrUrl]);
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCountdown(getSecondsRemaining());
-    }, 500);
-    return () => clearInterval(timer);
-  }, []);
-
   if (!session) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p className="text-gray-500">Oturum bulunamadi...</p>
+        <p className="text-gray-500">{hata || "Yükleniyor…"}</p>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-white p-8">
-      <h1 className="text-3xl font-bold text-gray-900 mb-2">
-        {session.lessonName}
-      </h1>
+      <h1 className="text-3xl font-bold text-gray-900 mb-2">{session.lessonName}</h1>
       <p className="text-gray-500 mb-6">
-        {formatDate(session.date)} | {formatDate(session.startTime)} - {formatDate(session.endTime)}
+        {trTarih(session.date)} | {session.startTime} - {session.endTime}
       </p>
 
-      <div className="bg-white border-4 border-gray-200 rounded-2xl p-8 mb-4 shadow-lg relative">
+      {hata && (
+        <div className="mb-4 bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm">
+          {hata}
+        </div>
+      )}
+
+      <div className="bg-white border-4 border-gray-200 rounded-2xl p-8 mb-4 shadow-lg">
         <canvas ref={canvasRef} />
       </div>
 
@@ -100,18 +109,13 @@ export default function QRPage() {
         <span className="text-gray-500 text-sm">sonra QR kod yenilenecek</span>
       </div>
 
-      <p className="text-lg text-gray-700 font-medium mb-2">
-        QR kodu telefonunuzla okutun
-      </p>
+      <p className="text-lg text-gray-700 font-medium mb-2">QR kodu telefonunuzla okutun</p>
       <p className="text-xs text-red-500 font-medium mb-6">
-        QR kod her 40 saniyede degisir, ekran goruntusu gecersiz olur
+        QR kod her 40 saniyede değişir, ekran görüntüsü geçersiz olur
       </p>
 
-      <Link
-        href="/"
-        className="text-blue-600 hover:text-blue-800 font-medium"
-      >
-        Ana Sayfaya Don
+      <Link href="/" className="text-blue-600 hover:text-blue-800 font-medium">
+        Ana Sayfaya Dön
       </Link>
     </div>
   );

@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Asistan Yoklama
 
-## Getting Started
+Sakarya Psikiyatri Ana Bilim Dalı asistan devam takip sistemi.
+Next.js 16 + PostgreSQL.
 
-First, run the development server:
+## Ne yapar
+
+- **Yoklama oturumu** açılır; asistanlar QR kod okutarak katılır ya da liste
+  üzerinden elle işaretlenir.
+- **Muafiyetler otomatik işlenir**: aylık dış rotasyon, günlük görev çizelgesi,
+  kıdem ve sabit görevlendirmeler birleştirilir.
+- **Excel çıktısı**: tek oturum veya tarih aralıklı dönem raporu.
+
+## Kurulum
 
 ```bash
+npm install
+cp .env.example .env.local     # DATABASE_URL ve TOKEN_SECRET doldurulur
+npm run db:setup               # şemayı kurar, ilk asistan listesini yükler
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`npm run db:setup` tekrar tekrar çalıştırılabilir; mevcut veriye dokunmaz.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Aylık kullanım
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+`/cizelge` ekranından her ay iki dosya yüklenir. İkisi de önce **önizlenir**,
+onaylanmadan hiçbir şey kaydedilmez.
 
-## Learn More
+| Dosya | İçerik | Etkisi |
+|---|---|---|
+| Rotasyon listesi | Kimin o ay hangi birimde olduğu | Nöroloji, Çoc. Psikiyatrisi, TRSM ve İzin/Rapor'daki asistanlar **tüm ay** muaf |
+| Günlük çalışma listesi | Gün gün nöbet ertesi, izin, poliklinik, konsültasyon | O günkü derste ilgili kişiler muaf |
 
-To learn more about Next.js, take a look at the following resources:
+Çizelgelerde geçen ama tanınmayan isimler sessizce atlanmaz; ekranda listelenir
+ve bir kez eşlenince (`name_aliases`) sonraki yüklemelerde otomatik uygulanır.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+**Muafiyet önceliği:** günlük görev → aylık rotasyon → sabit görevlendirme → kıdem.
+Daha somut olan kazanır; hepsi muaf sonucu verir, yalnızca gösterilen sebep değişir.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Ekranlar
 
-## Deploy on Vercel
+| Yol | İş |
+|---|---|
+| `/` | Oturum aç/kapat, geçmiş oturumlar, dönem raporu |
+| `/yoklama/[id]` | Yoklama listesi — işaretleme, arama, toplu işlem |
+| `/qr/[id]` | Projeksiyona yansıtılan QR kod (40 sn'de bir yenilenir) |
+| `/katilim` | Asistanın telefonunda açılan katılım ekranı |
+| `/asistanlar` | Asistan listesi yönetimi |
+| `/cizelge` | Aylık rotasyon ve günlük çizelge yükleme |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Veritabanı
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Şema `src/lib/schema.sql` içinde. Tablolar:
+
+- `assistants` — asistan listesi (silinmez, pasife alınır)
+- `sessions` — yoklama oturumları; `UNIQUE (lesson_name, date, start_time)`
+- `attendance` — kişi başına tek satır, `PRIMARY KEY (session_id, assistant_id)`
+- `duty_assignments` — günlük görevler
+- `rotations` — aylık dış rotasyonlar (tarih aralığı)
+- `name_aliases` — çizelgedeki yazımların asistanlara eşlenmesi
+- `used_tokens` — QR kodların tek kullanımlık olmasını sağlar
+
+## Güvenlik notları
+
+- QR token'ı sunucuda üretilip doğrulanır; imzalama anahtarı (`TOKEN_SECRET`)
+  tarayıcıya inmez. Her token tek kullanımlıktır ve 40 saniyede geçersizleşir.
+- **Yönetim ekranlarında kimlik doğrulama yoktur.** `/`, `/asistanlar` ve
+  `/cizelge` adresi bilen herkese açıktır; `/yoklama` sayfasındaki parola
+  istemci tarafındadır ve gerçek koruma sağlamaz. Yayına almadan önce
+  çözülmesi gereken konu budur.

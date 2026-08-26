@@ -1,4 +1,9 @@
-const SECRET = "yoklama-sakaryapsik-2026";
+// SUNUCUYA ÖZEL: bu dosya client bileşenlerinden import edilmemeli.
+// Anahtar tarayıcıya sızarsa QR taranmadan geçerli token üretilebilir.
+// Token'lar /api/sessions/[id]/token ucundan alınır.
+import "server-only";
+
+const SECRET = process.env.TOKEN_SECRET || "yoklama-sakaryapsik-2026";
 const TOKEN_INTERVAL = 40000; // 40 saniye
 
 function getTimeSlot(offsetSlots = 0): number {

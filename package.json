@@ -6,14 +6,18 @@
     "dev": "next dev --hostname 0.0.0.0",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:setup": "node --env-file-if-exists=.env.local scripts/db-setup.mjs"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "next": "16.2.10",
+    "postgres": "^3.4.9",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "react-qrcode-logo": "^4.1.0"
+    "react-qrcode-logo": "^4.1.0",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
