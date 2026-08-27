@@ -30,6 +30,34 @@ for (const stmt of statements) {
 }
 console.log(`Şema kuruldu (${statements.length} ifade).`);
 
+/* 1b) Göçler — mevcut tablolarda CREATE TABLE IF NOT EXISTS yetmez */
+
+// used_tokens: anahtar (token, session) idi; ekrandaki QR'ı aynı anda birden
+// çok kişi okutamıyordu. Kişi başına tek kullanıma çevriliyor.
+const gocler = [
+  `ALTER TABLE used_tokens ADD COLUMN IF NOT EXISTS assistant_id INTEGER
+     REFERENCES assistants(id) ON DELETE CASCADE`,
+  // Eski satırlarda kişi bilgisi yok; token'lar zaten 40 saniyede ölüyor.
+  `DELETE FROM used_tokens WHERE assistant_id IS NULL`,
+  `ALTER TABLE used_tokens ALTER COLUMN assistant_id SET NOT NULL`,
+  `ALTER TABLE used_tokens DROP CONSTRAINT IF EXISTS used_tokens_pkey`,
+  `ALTER TABLE used_tokens ADD PRIMARY KEY (token, session_id, assistant_id)`,
+];
+
+for (const g of gocler) {
+  try {
+    await sql.unsafe(g);
+  } catch (e) {
+    // Zaten uygulanmış göçler hata verir; bunlar beklenen durumlardır.
+    const beklenen = ["42P16", "42710", "42P07", "42701"];
+    if (!beklenen.includes(e.code)) {
+      console.error("Göç başarısız:", g.split("\n")[0], "->", e.message);
+      throw e;
+    }
+  }
+}
+console.log("Göçler kontrol edildi.");
+
 /* 2) Asistanlar — ilk kurulum listesi */
 
 // Liste yalnızca ilk kurulum içindir; sonrasında asistanlar /asistanlar

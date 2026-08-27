@@ -36,12 +36,10 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/sessions/[i
     );
   }
 
-  if (!(await claimToken(id, token))) {
-    return Response.json(
-      { error: "Bu kod zaten kullanılmış. Ekrandaki yeni kodu okutun." },
-      { status: 409 }
-    );
-  }
+  // Aynı kişi aynı kodu tekrar gönderirse sessizce geçilir — yoklaması zaten
+  // işlenmiştir. Başkalarının aynı kodu kullanmasını engellemez: ekrandaki QR'ı
+  // aynı anda onlarca kişi okutur.
+  await claimToken(id, token, assistantId);
 
   await markAttendance(id, {
     assistantId,

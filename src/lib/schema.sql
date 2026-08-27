@@ -81,9 +81,14 @@ CREATE TABLE IF NOT EXISTS name_aliases (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- QR token'ları KİŞİ BAŞINA tek kullanımlıktır, token başına değil.
+-- Ekrandaki kodu aynı anda onlarca kişi okutur; anahtar yalnızca (token,
+-- session) olsaydı ilk okutan geçer, diğerleri "kod kullanılmış" alırdı.
+-- Sahte okutmaya karşı asıl koruma token'ın 40 saniyede geçersizleşmesidir.
 CREATE TABLE IF NOT EXISTS used_tokens (
-  token       TEXT NOT NULL,
-  session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  used_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (token, session_id)
+  token        TEXT NOT NULL,
+  session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  assistant_id INTEGER NOT NULL REFERENCES assistants(id) ON DELETE CASCADE,
+  used_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (token, session_id, assistant_id)
 );

@@ -475,10 +475,15 @@ export async function listNameAliases(): Promise<
  * Token'ı tek kullanımlık olarak harcar. Aynı token ikinci kez gelirse
  * INSERT çakışır ve false döner — yarış durumu veritabanı seviyesinde çözülür.
  */
-export async function claimToken(sessionId: string, token: string): Promise<boolean> {
+export async function claimToken(
+  sessionId: string,
+  token: string,
+  assistantId: number
+): Promise<boolean> {
   const rows = await sql`
-    INSERT INTO used_tokens (token, session_id) VALUES (${token}, ${sessionId})
-    ON CONFLICT (token, session_id) DO NOTHING
+    INSERT INTO used_tokens (token, session_id, assistant_id)
+    VALUES (${token}, ${sessionId}, ${assistantId})
+    ON CONFLICT (token, session_id, assistant_id) DO NOTHING
     RETURNING token
   `;
   return rows.length > 0;
