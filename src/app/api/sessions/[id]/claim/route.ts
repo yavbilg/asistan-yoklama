@@ -2,12 +2,21 @@ import { NextRequest } from "next/server";
 import { validateToken } from "@/lib/token";
 import { getSession, claimToken, markAttendance } from "@/lib/db";
 
+// Sunucu UTC çalıştığı için saat dilimi açıkça veriliyor.
+const saatBicimi = new Intl.DateTimeFormat("tr-TR", {
+  timeZone: "Europe/Istanbul",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
 /**
- * QR ile katılım. Sırayla: oturum açık mı → token geçerli mi →
- * token daha önce kullanılmış mı → yoklamaya işle.
+ * QR ile katılım. Sırayla: oturum açık mı → bu kişinin yoklaması zaten
+ * alınmış mı → token geçerli mi → yoklamaya işle.
  *
- * Tek kullanım kontrolü veritabanındaki PRIMARY KEY ile yapılır,
- * yani iki kişi aynı anda aynı token'ı gönderirse yalnızca biri geçer.
+ * Token kişi başına tek kullanımlıktır (used_tokens birincil anahtarı), ama
+ * aynı kodu aynı anda onlarca kişi kullanabilir — ekrandaki QR herkes için
+ * aynıdır. Sahte okutmaya karşı koruma token'ın 40 saniyede ölmesidir.
  */
 export async function POST(req: NextRequest, ctx: RouteContext<"/api/sessions/[id]/claim">) {
   const { id } = await ctx.params;
@@ -27,6 +36,21 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/sessions/[i
   if (!session) return Response.json({ error: "Oturum bulunamadı." }, { status: 404 });
   if (!session.active) {
     return Response.json({ error: "Bu oturum kapanmış." }, { status: 409 });
+  }
+
+  // Yoklaması alınmış kişi, 40 saniye sonraki yeni kodla tekrar giremez.
+  // Cihazdaki localStorage koruması yalnızca aynı tarayıcıda işe yarıyordu;
+  // asıl kontrol burada.
+  const mevcut = session.attendance.find((a) => a.assistantId === assistantId);
+  if (mevcut?.status === "var") {
+    return Response.json(
+      {
+        error: `Bu asistanın yoklaması zaten alınmış (${saatBicimi.format(
+          new Date(mevcut.timestamp ?? Date.now())
+        )}). Değişiklik gerekiyorsa yoklama listesinden yapılabilir.`,
+      },
+      { status: 409 }
+    );
   }
 
   if (!validateToken(id, token)) {

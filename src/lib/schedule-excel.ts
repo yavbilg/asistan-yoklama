@@ -143,9 +143,13 @@ function cellText(v: ExcelJS.CellValue): string {
   return String(v);
 }
 
+/**
+ * ExcelJS tarih hücrelerini UTC gece yarısı olarak verir; UTC getter'larla
+ * okuyoruz. Yerel getter'lar negatif saat diliminde günü bir geri kaydırırdı.
+ */
 function isoDate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate()
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    d.getUTCDate()
   ).padStart(2, "0")}`;
 }
 
@@ -200,7 +204,7 @@ export async function parseScheduleWorkbook(
 
         // Yalnızca saat içeren hücreler (örn "08:00") Excel'in sıfır
         // noktasına, 1899'a düşer. Bunlar gün değildir.
-        const yil = hucre.getFullYear();
+        const yil = hucre.getUTCFullYear();
         if (yil < 2000 || yil > 2100) continue;
 
         const gun = isoDate(hucre);

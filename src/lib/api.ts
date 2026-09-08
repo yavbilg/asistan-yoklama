@@ -164,18 +164,36 @@ export function trTarih(iso: string): string {
   return `${g}.${a}.${y}`;
 }
 
-/** Bugünün tarihi, YYYY-AA-GG. toISOString() saat dilimi kaydırdığı için elle kuruluyor. */
+/**
+ * Bugünün tarihi, YYYY-AA-GG — Türkiye saatine göre.
+ * Cihazın saat dilimi farklıysa oturum yanlış güne açılmasın diye sabitlendi.
+ */
+const TARIH_BICIMI = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Istanbul",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 export function bugun(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
+  return TARIH_BICIMI.format(new Date()); // en-CA => YYYY-MM-DD
 }
 
-/** ISO zaman damgasından SS:DD */
+/**
+ * ISO zaman damgasından SS:DD.
+ * Saat dilimi açıkça veriliyor: cihazın diliminden bağımsız olarak Excel
+ * çıktısıyla aynı değeri göstersin.
+ */
+const SAAT_BICIMI = new Intl.DateTimeFormat("tr-TR", {
+  timeZone: "Europe/Istanbul",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
 export function saat(iso?: string): string {
   if (!iso) return "-";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "-";
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return SAAT_BICIMI.format(d);
 }

@@ -19,11 +19,23 @@ export function trDate(iso: string): string {
   return `${d}.${m}.${y}`;
 }
 
+/**
+ * Saatler veritabanında UTC saklanır. Bu dosya SUNUCUDA üretiliyor ve Vercel
+ * işlevleri UTC çalışıyor; yerel saate çevirmek yerine saat dilimini açıkça
+ * veriyoruz, yoksa çıktı üç saat geri görünüyor.
+ */
+const SAAT_BICIMI = new Intl.DateTimeFormat("tr-TR", {
+  timeZone: "Europe/Istanbul",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
 function trTime(iso?: string): string {
   if (!iso) return "-";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "-";
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return SAAT_BICIMI.format(d);
 }
 
 function styleHeader(row: ExcelJS.Row) {
