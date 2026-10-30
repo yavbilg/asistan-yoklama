@@ -56,15 +56,23 @@ export default function QRPage() {
       setCountdown((s) => {
         if (s <= 1) {
           qrYenile();
-          return 40;
+          return 20; // geçici; qrYenile sunucunun verdiği gerçek kalan süreyle düzeltir
         }
         return s - 1;
       });
     }, 1000);
 
+    // Tarayıcı arka plandaki sekmenin zamanlayıcılarını yavaşlatır; sekme
+    // tekrar görünür olunca beklemeden yenile ki ekranda bayat kod kalmasın.
+    const gorunur = () => {
+      if (document.visibilityState === "visible") qrYenile();
+    };
+    document.addEventListener("visibilitychange", gorunur);
+
     return () => {
       clearTimeout(ilk);
       clearInterval(sayac);
+      document.removeEventListener("visibilitychange", gorunur);
     };
   }, [session, qrYenile]);
 
@@ -111,7 +119,7 @@ export default function QRPage() {
 
       <p className="text-lg text-gray-700 font-medium mb-2">QR kodu telefonunuzla okutun</p>
       <p className="text-xs text-red-500 font-medium mb-6">
-        QR kod her 40 saniyede değişir, ekran görüntüsü geçersiz olur
+        QR kod her 20 saniyede değişir, fotoğrafı iletilen kod kısa sürede geçersiz olur
       </p>
 
       <Link href="/" className="text-blue-600 hover:text-blue-800 font-medium">

@@ -1,4 +1,5 @@
 import postgres from "postgres";
+import { createHash } from "node:crypto";
 
 // Tembel başlatma: bağlantı ilk sorguda kurulur. Modül import edilir edilmez
 // hata fırlatırsa DATABASE_URL'siz ortamda `next build` de patlar.
@@ -469,22 +470,122 @@ export async function listNameAliases(): Promise<
   }));
 }
 
-/* ---------- QR token ---------- */
+/* ---------- Telefon kaydı ve QR ile katılım ---------- */
+
+/** Çerezdeki ham değer saklanmaz; özeti saklanır. */
+export function hashDevice(ham: string): string {
+  return createHash("sha256").update(ham).digest("hex");
+}
+
+/** Bu telefon kime kayıtlı? */
+export async function getDeviceOwner(
+  idHash: string
+): Promise<{ assistantId: number; name: string } | null> {
+  const rows = await sql`
+    SELECT d.assistant_id, a.name
+    FROM devices d JOIN assistants a ON a.id = d.assistant_id
+    WHERE d.id_hash = ${idHash}
+  `;
+  if (rows.length === 0) return null;
+  return { assistantId: rows[0].assistant_id as number, name: rows[0].name as string };
+}
+
+/** Bir telefona kayıtlı kişilerin kimlikleri — isim listesinde işaretlemek için. */
+export async function boundAssistantIds(): Promise<Set<number>> {
+  const rows = await sql`SELECT assistant_id FROM devices`;
+  return new Set(rows.map((r) => r.assistant_id as number));
+}
 
 /**
- * Token'ı tek kullanımlık olarak harcar. Aynı token ikinci kez gelirse
- * INSERT çakışır ve false döner — yarış durumu veritabanı seviyesinde çözülür.
+ * Telefonu bir kişiye bağlar. Kişi zaten başka bir telefona bağlıysa
+ * UNIQUE (assistant_id) kısıtı yazmayı engeller — kontrol ve yazma tek adım.
  */
-export async function claimToken(
-  sessionId: string,
-  token: string,
-  assistantId: number
-): Promise<boolean> {
+export async function registerDevice(
+  idHash: string,
+  assistantId: number,
+  userAgent: string
+): Promise<"kaydedildi" | "kisi-baska-telefonda"> {
   const rows = await sql`
-    INSERT INTO used_tokens (token, session_id, assistant_id)
-    VALUES (${token}, ${sessionId}, ${assistantId})
-    ON CONFLICT (token, session_id, assistant_id) DO NOTHING
-    RETURNING token
+    INSERT INTO devices (id_hash, assistant_id, user_agent)
+    VALUES (${idHash}, ${assistantId}, ${userAgent.slice(0, 300)})
+    ON CONFLICT DO NOTHING
+    RETURNING assistant_id
   `;
+  return rows.length > 0 ? "kaydedildi" : "kisi-baska-telefonda";
+}
+
+export async function touchDevice(idHash: string): Promise<void> {
+  await sql`UPDATE devices SET last_used_at = now() WHERE id_hash = ${idHash}`;
+}
+
+/**
+ * QR ile katılım. qr_claims'e yazma ve yoklamayı "var" yapma TEK ifadede
+ * olur; ikinci bir istek ya da aynı telefondan başka bir isim kısıta takılır
+ * ve hiçbir şey yazılmaz. Önce-oku-sonra-yaz yarışı yoktur.
+ */
+export async function claimViaQr(
+  sessionId: string,
+  assistantId: number,
+  deviceHash: string
+): Promise<
+  { ok: true; at: string } | { ok: false; sebep: "kisi-zaten" | "telefon-zaten" }
+> {
+  const rows = await sql`
+    WITH talep AS (
+      INSERT INTO qr_claims (session_id, assistant_id, device_hash)
+      VALUES (${sessionId}, ${assistantId}, ${deviceHash})
+      ON CONFLICT DO NOTHING
+      RETURNING session_id, assistant_id, claimed_at
+    ), yoklama AS (
+      INSERT INTO attendance (session_id, assistant_id, status, work_location, marked_at, updated_at)
+      SELECT session_id, assistant_id, 'var', NULL, claimed_at, now() FROM talep
+      ON CONFLICT (session_id, assistant_id) DO UPDATE SET
+        status        = 'var',
+        work_location = NULL,
+        marked_at     = EXCLUDED.marked_at,
+        updated_at    = now()
+      RETURNING marked_at
+    )
+    SELECT marked_at FROM yoklama
+  `;
+  if (rows.length > 0) {
+    return { ok: true, at: new Date(rows[0].marked_at as string).toISOString() };
+  }
+
+  // Yazılmadıysa hangi kısıta takıldığına bak.
+  const kisi = await sql`
+    SELECT 1 FROM qr_claims WHERE session_id = ${sessionId} AND assistant_id = ${assistantId}
+  `;
+  return { ok: false, sebep: kisi.length > 0 ? "kisi-zaten" : "telefon-zaten" };
+}
+
+/** Kişinin bu dersteki yoklaması "var" mı, varsa saati. */
+export async function getPresence(
+  sessionId: string,
+  assistantId: number
+): Promise<string | null> {
+  const rows = await sql`
+    SELECT marked_at FROM attendance
+    WHERE session_id = ${sessionId} AND assistant_id = ${assistantId} AND status = 'var'
+  `;
+  if (rows.length === 0) return null;
+  return rows[0].marked_at ? new Date(rows[0].marked_at as string).toISOString() : "";
+}
+
+/** Yönetim ekranı için: kim hangi tarihte telefon kaydettirdi. */
+export async function listDevices(): Promise<
+  { assistantId: number; createdAt: string; lastUsedAt: string }[]
+> {
+  const rows = await sql`SELECT assistant_id, created_at, last_used_at FROM devices`;
+  return rows.map((r) => ({
+    assistantId: r.assistant_id as number,
+    createdAt: new Date(r.created_at as string).toISOString(),
+    lastUsedAt: new Date(r.last_used_at as string).toISOString(),
+  }));
+}
+
+/** Telefon değiştiğinde ya da yanlış kayıtta: kişinin telefon bağını kaldırır. */
+export async function unbindDevice(assistantId: number): Promise<boolean> {
+  const rows = await sql`DELETE FROM devices WHERE assistant_id = ${assistantId} RETURNING 1`;
   return rows.length > 0;
 }

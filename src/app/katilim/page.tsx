@@ -1,224 +1,299 @@
-"use client";
-
-import { Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { WORK_LOCATIONS, isExempt } from "@/lib/assistants";
+import { cookies } from "next/headers";
+import { randomBytes } from "node:crypto";
 import {
-  Assistant,
-  Session,
-  claimAttendance,
-  fetchAssistants,
-  fetchSession,
-  trTarih,
-} from "@/lib/api";
+  getSession,
+  listAssistants,
+  hashDevice,
+  getDeviceOwner,
+  getPresence,
+  boundAssistantIds,
+} from "@/lib/db";
+import { validateToken, mintTicket } from "@/lib/token";
+import { CIHAZ_CEREZI } from "@/lib/cihaz";
+import { katil } from "./actions";
+import IsimListesi from "./IsimListesi";
+import GonderButonu from "./GonderButonu";
 
-function KatilimIcerik() {
-  const searchParams = useSearchParams();
-  const sessionId = searchParams.get("s");
-  const token = searchParams.get("t");
+/**
+ * QR okutulunca açılan sayfa. Sunucuda çizilir: telefon tek istekte hazır
+ * ekranı alır, JavaScript'i ve ayrı API çağrılarını beklemez. Form da
+ * JavaScript'siz çalışır.
+ *
+ * QR kodu burada, sayfa AÇILIRKEN doğrulanır ve sayfaya 5 dakikalık bir
+ * bilet gömülür. Kişi isim seçerken ya da bağlantı yavaşken kodun süresi
+ * dolsa bile gönderim geçerli olur.
+ */
 
-  const [session, setSession] = useState<Session | null>(null);
-  const [assistants, setAssistants] = useState<Assistant[]>([]);
-  const [secili, setSecili] = useState<number | null>(null);
-  const [arama, setArama] = useState("");
-  const [muafFormu, setMuafFormu] = useState(false);
-  const [gonderilenAd, setGonderilenAd] = useState<string | null>(null);
-  const [hata, setHata] = useState("");
-  const [gonderiliyor, setGonderiliyor] = useState(false);
+const HATALAR: Record<string, string> = {
+  eksik: "Eksik bilgi. Ekrandaki QR kodu tekrar okutun.",
+  bilet: "Sayfa çok uzun açık kaldı. Ekrandaki QR kodu tekrar okutun.",
+  "oturum-yok": "Bu yoklama oturumu bulunamadı.",
+  "oturum-kapali": "Bu yoklama oturumu kapanmış.",
+  "telefon-baskasinin": "Bu telefon başka bir asistan adına kayıtlı.",
+  "isim-kayitli":
+    "Bu isim başka bir telefona kayıtlı. Telefonunuz değiştiyse yoklama sorumlusundan kaydı sıfırlamasını isteyin.",
+  "telefon-kullanildi": "Bu telefondan bu derste zaten yoklama verildi.",
+  sunucu: "Bir hata oluştu. Ekrandaki QR kodu tekrar okutup deneyin.",
+};
 
-  useEffect(() => {
-    if (!sessionId) return;
-    let iptal = false;
+const SAAT = new Intl.DateTimeFormat("tr-TR", {
+  timeZone: "Europe/Istanbul",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
 
-    (async () => {
-      // Aynı cihazdan ikinci kez yoklama verilmesin.
-      const kayit = localStorage.getItem(`yoklama_done_${sessionId}`);
-      if (kayit && !iptal) setGonderilenAd(kayit);
+function trTarih(iso: string): string {
+  const [y, a, g] = iso.split("-");
+  return `${g}.${a}.${y}`;
+}
 
-      try {
-        const [s, a] = await Promise.all([fetchSession(sessionId), fetchAssistants()]);
-        if (iptal) return;
-        setSession(s);
-        setAssistants(a);
-      } catch (e) {
-        if (!iptal) setHata(e instanceof Error ? e.message : "Oturum bulunamadı.");
-      }
-    })();
+function tek(v: string | string[] | undefined): string {
+  return Array.isArray(v) ? v[0] ?? "" : v ?? "";
+}
 
-    return () => {
-      iptal = true;
-    };
-  }, [sessionId]);
+/* ---------- Ekran parçaları ---------- */
 
-  const gonder = async (assistantId: number, status: "var" | "muaf", location?: string) => {
-    if (!sessionId || !token) return;
-    setGonderiliyor(true);
-    setHata("");
-    try {
-      await claimAttendance(sessionId, token, assistantId, status, location);
-      const ad = assistants.find((a) => a.id === assistantId)?.name ?? "";
-      localStorage.setItem(`yoklama_done_${sessionId}`, ad);
-      setGonderilenAd(ad);
-    } catch (e) {
-      setHata(e instanceof Error ? e.message : "Gönderilemedi.");
-      setSecili(null);
-      setMuafFormu(false);
-    } finally {
-      setGonderiliyor(false);
-    }
-  };
+function Kabuk({ children }: { children: React.ReactNode }) {
+  return <div className="max-w-lg mx-auto p-4 min-h-screen bg-gray-50">{children}</div>;
+}
 
-  if (!sessionId || !token) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <div className="text-center p-8">
-          <p className="text-gray-500 text-lg">Geçersiz yoklama bağlantısı</p>
-          <p className="text-gray-400 text-sm mt-2">Lütfen QR kodu tekrar okutun.</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (gonderilenAd) {
-    return (
-      <div className="max-w-lg mx-auto p-4 min-h-screen bg-gray-50 flex flex-col items-center justify-center">
-        <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-8 text-center w-full">
-          <div className="text-5xl mb-4">&#10003;</div>
-          <h1 className="text-2xl font-bold text-green-800 mb-2">Yoklama Alındı</h1>
-          <p className="text-green-700 text-lg font-medium mb-4">{gonderilenAd}</p>
-          {session && (
-            <div className="bg-white rounded-xl p-4 mt-4">
-              <p className="text-gray-700 font-medium">{session.lessonName}</p>
-              <p className="text-gray-500 text-sm">
-                {trTarih(session.date)} | {session.startTime} - {session.endTime}
-              </p>
-            </div>
-          )}
-          <p className="text-gray-400 text-sm mt-6">Bu cihazdan yoklama zaten verildi.</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!session) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <p className="text-gray-500">{hata || "Yükleniyor…"}</p>
-      </div>
-    );
-  }
-
-  const gosterilen = assistants.filter((a) =>
-    a.name.toLocaleLowerCase("tr").includes(arama.toLocaleLowerCase("tr"))
-  );
-
+function DersBasligi({ ad, tarih, bas, bit }: { ad: string; tarih: string; bas: string; bit: string }) {
   return (
-    <div className="max-w-lg mx-auto p-4 min-h-screen bg-gray-50">
-      <div className="bg-white rounded-2xl p-5 mb-4 border">
-        <h1 className="text-xl font-bold text-gray-900">{session.lessonName}</h1>
-        <p className="text-gray-500 text-sm">
-          {trTarih(session.date)} | {session.startTime} - {session.endTime}
-        </p>
-      </div>
-
-      {hata && (
-        <div className="mb-4 bg-red-50 border-2 border-red-200 text-red-700 rounded-2xl p-4 text-sm text-center">
-          {hata}
-        </div>
-      )}
-
-      {muafFormu && secili !== null ? (
-        <div className="bg-white rounded-2xl p-5 border">
-          <p className="font-medium text-gray-900 mb-1">
-            {assistants.find((a) => a.id === secili)?.name}
-          </p>
-          <p className="text-sm text-gray-500 mb-4">Çalışma yerinizi seçin:</p>
-          <div className="grid grid-cols-2 gap-2">
-            {WORK_LOCATIONS.filter((l) => isExempt(l)).map((loc) => (
-              <button
-                key={loc}
-                disabled={gonderiliyor}
-                onClick={() => gonder(secili, "muaf", loc)}
-                className="border rounded-xl px-3 py-3 text-sm hover:bg-gray-50 disabled:opacity-50 text-gray-800"
-              >
-                {loc}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => {
-              setMuafFormu(false);
-              setSecili(null);
-            }}
-            className="mt-4 text-sm text-gray-500 underline"
-          >
-            Geri
-          </button>
-        </div>
-      ) : secili !== null ? (
-        <div className="bg-white rounded-2xl p-5 border text-center">
-          <p className="font-medium text-gray-900 mb-4">
-            {assistants.find((a) => a.id === secili)?.name}
-          </p>
-          <div className="flex flex-col gap-2">
-            <button
-              disabled={gonderiliyor}
-              onClick={() => gonder(secili, "var")}
-              className="bg-green-600 text-white rounded-xl py-3 font-medium hover:bg-green-700 disabled:opacity-50"
-            >
-              {gonderiliyor ? "Gönderiliyor…" : "Derste Varım"}
-            </button>
-            <button
-              disabled={gonderiliyor}
-              onClick={() => setMuafFormu(true)}
-              className="border rounded-xl py-3 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-            >
-              Muafım (görevdeyim)
-            </button>
-            <button onClick={() => setSecili(null)} className="text-sm text-gray-500 underline mt-2">
-              Geri
-            </button>
-          </div>
-        </div>
-      ) : (
-        <>
-          <input
-            type="search"
-            value={arama}
-            onChange={(e) => setArama(e.target.value)}
-            placeholder="Adınızı arayın…"
-            className="w-full border rounded-xl px-4 py-3 text-gray-900 mb-3"
-          />
-          <div className="bg-white rounded-2xl border divide-y overflow-hidden">
-            {gosterilen.length === 0 && (
-              <p className="p-6 text-center text-sm text-gray-500">Eşleşen isim yok.</p>
-            )}
-            {gosterilen.map((a) => (
-              <button
-                key={a.id}
-                onClick={() => setSecili(a.id)}
-                className="w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-900"
-              >
-                {a.name}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+    <div className="bg-white rounded-2xl p-5 mb-4 border">
+      <h1 className="text-xl font-bold text-gray-900">{ad}</h1>
+      <p className="text-gray-500 text-sm">
+        {trTarih(tarih)} | {bas} - {bit}
+      </p>
     </div>
   );
 }
 
-export default function KatilimPage() {
+function Durum({
+  renk,
+  simge,
+  baslik,
+  children,
+}: {
+  renk: "yesil" | "kirmizi" | "gri";
+  simge: string;
+  baslik: string;
+  children?: React.ReactNode;
+}) {
+  const stil = {
+    yesil: "bg-green-50 border-green-200 text-green-800",
+    kirmizi: "bg-red-50 border-red-200 text-red-800",
+    gri: "bg-white border-gray-200 text-gray-800",
+  }[renk];
   return (
-    <Suspense
-      fallback={
-        <div className="flex items-center justify-center min-h-screen bg-gray-50">
-          <p className="text-gray-500">Yükleniyor…</p>
+    <div className={`border-2 rounded-2xl p-8 text-center ${stil}`}>
+      <div className="text-5xl mb-3">{simge}</div>
+      <h2 className="text-2xl font-bold mb-2">{baslik}</h2>
+      {children}
+    </div>
+  );
+}
+
+function HataKutusu({ kod }: { kod: string }) {
+  const mesaj = HATALAR[kod];
+  if (!mesaj) return null;
+  return (
+    <div className="mb-4 bg-red-50 border-2 border-red-200 text-red-700 rounded-2xl p-4 text-sm text-center">
+      {mesaj}
+    </div>
+  );
+}
+
+function KatilimFormu({
+  s,
+  t,
+  bilet,
+  asistanId,
+  dugme,
+  aday,
+}: {
+  s: string;
+  t: string;
+  bilet: string;
+  asistanId: number;
+  dugme: string;
+  aday?: string;
+}) {
+  return (
+    <form action={katil}>
+      <input type="hidden" name="s" value={s} />
+      <input type="hidden" name="t" value={t} />
+      <input type="hidden" name="bilet" value={bilet} />
+      <input type="hidden" name="asistan" value={asistanId} />
+      {aday && <input type="hidden" name="aday" value={aday} />}
+      <GonderButonu>{dugme}</GonderButonu>
+    </form>
+  );
+}
+
+/* ---------- Sayfa ---------- */
+
+export default async function KatilimPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const p = await searchParams;
+  const s = tek(p.s);
+  const t = tek(p.t);
+  const hata = tek(p.hata);
+  const secim = Number(tek(p.secim));
+
+  if (!s) {
+    return (
+      <Kabuk>
+        <Durum renk="gri" simge="⚠" baslik="Geçersiz bağlantı">
+          <p>Lütfen ekrandaki QR kodu okutun.</p>
+        </Durum>
+      </Kabuk>
+    );
+  }
+
+  const session = await getSession(s);
+  if (!session) {
+    return (
+      <Kabuk>
+        <Durum renk="gri" simge="⚠" baslik="Oturum bulunamadı">
+          <p>Lütfen ekrandaki QR kodu tekrar okutun.</p>
+        </Durum>
+      </Kabuk>
+    );
+  }
+
+  const baslik = (
+    <DersBasligi
+      ad={session.lessonName}
+      tarih={session.date}
+      bas={session.startTime}
+      bit={session.endTime}
+    />
+  );
+
+  // Telefon kime kayıtlı?
+  const ham = (await cookies()).get(CIHAZ_CEREZI)?.value;
+  const sahip = ham ? await getDeviceOwner(hashDevice(ham)) : null;
+
+  // Yoklaması alınmışsa QR'a bakmadan onay göster.
+  if (sahip) {
+    const ne = await getPresence(s, sahip.assistantId);
+    if (ne !== null) {
+      return (
+        <Kabuk>
+          {baslik}
+          <Durum renk="yesil" simge="✓" baslik="Yoklamanız alındı">
+            <p className="text-lg font-medium">{sahip.name}</p>
+            {ne && <p className="text-sm mt-1">Saat {SAAT.format(new Date(ne))}</p>}
+          </Durum>
+        </Kabuk>
+      );
+    }
+  }
+
+  if (!session.active) {
+    return (
+      <Kabuk>
+        {baslik}
+        <Durum renk="gri" simge="■" baslik="Oturum kapandı">
+          <p>Bu ders için yoklama artık alınmıyor.</p>
+        </Durum>
+      </Kabuk>
+    );
+  }
+
+  if (!(await validateToken(s, t))) {
+    return (
+      <Kabuk>
+        {baslik}
+        <HataKutusu kod={hata} />
+        <Durum renk="kirmizi" simge="⏰" baslik="QR kodun süresi doldu">
+          <p>Ekrandaki güncel QR kodu tekrar okutun.</p>
+        </Durum>
+      </Kabuk>
+    );
+  }
+
+  const bilet = await mintTicket(s);
+  const temelAdres = `/katilim?${new URLSearchParams({ s, t })}`;
+
+  // Kayıtlı telefon: liste yok, tek düğme.
+  if (sahip) {
+    return (
+      <Kabuk>
+        {baslik}
+        <HataKutusu kod={hata} />
+        <div className="bg-white rounded-2xl p-6 border text-center">
+          <p className="text-gray-500 text-sm mb-1">Bu telefon kayıtlı:</p>
+          <p className="text-xl font-semibold text-gray-900 mb-5">{sahip.name}</p>
+          <KatilimFormu s={s} t={t} bilet={bilet} asistanId={sahip.assistantId} dugme="Derste Varım" />
+          <p className="text-xs text-gray-400 mt-4">
+            Bu siz değilseniz yoklama sorumlusuna haber verin.
+          </p>
         </div>
-      }
-    >
-      <KatilimIcerik />
-    </Suspense>
+      </Kabuk>
+    );
+  }
+
+  const [asistanlar, kayitlilar] = await Promise.all([listAssistants(), boundAssistantIds()]);
+
+  // İlk kez kullanılan telefon, isim seçilmiş: onay ekranı.
+  const secilen = asistanlar.find((a) => a.id === secim);
+  if (secilen) {
+    if (kayitlilar.has(secilen.id)) {
+      return (
+        <Kabuk>
+          {baslik}
+          <HataKutusu kod="isim-kayitli" />
+          <a href={temelAdres} className="block text-center text-sm text-gray-600 underline">
+            Geri
+          </a>
+        </Kabuk>
+      );
+    }
+    return (
+      <Kabuk>
+        {baslik}
+        <HataKutusu kod={hata} />
+        <div className="bg-white rounded-2xl p-6 border text-center">
+          <p className="text-xl font-semibold text-gray-900 mb-3">{secilen.name}</p>
+          <p className="text-sm text-gray-600 mb-5">
+            Bu telefon <b>{secilen.name}</b> adına kaydedilecek. Sonraki derslerde isim
+            seçmeden tek dokunuşla yoklama verirsiniz. Bu telefondan başka biri adına
+            yoklama verilemez.
+          </p>
+          <KatilimFormu
+            s={s}
+            t={t}
+            bilet={bilet}
+            asistanId={secilen.id}
+            dugme="Kaydol ve Derste Varım"
+            aday={randomBytes(32).toString("base64url")}
+          />
+          <a href={temelAdres} className="block mt-4 text-sm text-gray-500 underline">
+            Ben değilim, geri dön
+          </a>
+        </div>
+      </Kabuk>
+    );
+  }
+
+  // İlk kez kullanılan telefon: isim listesi.
+  const kisiler = asistanlar
+    .map((a) => ({ id: a.id, name: a.name, kayitli: kayitlilar.has(a.id) }))
+    .sort((x, y) => x.name.localeCompare(y.name, "tr"));
+
+  return (
+    <Kabuk>
+      {baslik}
+      <HataKutusu kod={hata} />
+      <p className="text-sm text-gray-600 mb-3">
+        İlk kullanım: adınızı seçin. Telefonunuz bu isme kaydedilecek.
+      </p>
+      <IsimListesi kisiler={kisiler} temelAdres={temelAdres} />
+    </Kabuk>
   );
 }

@@ -142,19 +142,6 @@ export async function fetchToken(
   return istek(`/api/sessions/${sessionId}/token`);
 }
 
-export async function claimAttendance(
-  sessionId: string,
-  token: string,
-  assistantId: number,
-  status: "var" | "muaf" = "var",
-  workLocation?: string
-): Promise<void> {
-  await istek(`/api/sessions/${sessionId}/claim`, {
-    method: "POST",
-    body: JSON.stringify({ token, assistantId, status, workLocation }),
-  });
-}
-
 /* ---------- Yardımcılar ---------- */
 
 /** 2026-08-23 → 23.08.2026 */

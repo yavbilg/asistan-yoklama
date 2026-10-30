@@ -16,7 +16,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext<"/api/sessions/[i
   }
 
   return Response.json(
-    { token: generateToken(id), secondsRemaining: getSecondsRemaining() },
+    { token: await generateToken(id), secondsRemaining: getSecondsRemaining() },
     { headers: { "Cache-Control": "no-store" } }
   );
 }

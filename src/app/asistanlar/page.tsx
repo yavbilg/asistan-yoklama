@@ -12,6 +12,7 @@ import {
 
 export default function AsistanlarPage() {
   const [assistants, setAssistants] = useState<Assistant[]>([]);
+  const [telefonlar, setTelefonlar] = useState<Map<number, string>>(new Map());
   const [pasifleriGoster, setPasifleriGoster] = useState(false);
   const [yeniAd, setYeniAd] = useState("");
   const [yeniTarih, setYeniTarih] = useState("");
@@ -23,7 +24,19 @@ export default function AsistanlarPage() {
 
   const yenile = useCallback(async () => {
     try {
-      setAssistants(await fetchAssistants(true));
+      const [liste, cihaz] = await Promise.all([
+        fetchAssistants(true),
+        fetch("/api/devices").then((r) => r.json()),
+      ]);
+      setAssistants(liste);
+      setTelefonlar(
+        new Map(
+          (cihaz.devices ?? []).map((d: { assistantId: number; createdAt: string }) => [
+            d.assistantId,
+            d.createdAt,
+          ])
+        )
+      );
       setHata("");
     } catch (e) {
       setHata(e instanceof Error ? e.message : "Liste yüklenemedi.");
@@ -56,6 +69,33 @@ export default function AsistanlarPage() {
       await yenile();
     } catch (e) {
       setHata(e instanceof Error ? e.message : "Kaydedilemedi.");
+    }
+  };
+
+  /** Telefon değiştiyse ya da yanlış isim seçildiyse kaydı kaldırır. */
+  const telefonuSifirla = async (a: Assistant) => {
+    if (
+      !confirm(
+        `${a.name} adlı asistanın telefon kaydı silinsin mi?\n\n` +
+          `Bir sonraki QR okutmada yeni telefonunu kaydedebilecek.`
+      )
+    )
+      return;
+    const sifre = prompt("Yönetici şifresi:");
+    if (!sifre) return;
+    try {
+      const r = await fetch(`/api/devices?assistantId=${a.id}`, {
+        method: "DELETE",
+        headers: { "x-yonetici-sifre": sifre },
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        setHata(d.error ?? "Sıfırlanamadı.");
+        return;
+      }
+      await yenile();
+    } catch {
+      setHata("Sıfırlanamadı.");
     }
   };
 
@@ -185,6 +225,17 @@ export default function AsistanlarPage() {
                     {a.name}
                   </span>
                   <span className="text-sm text-gray-500 w-24">{a.endDate || "-"}</span>
+                  {telefonlar.has(a.id) ? (
+                    <button
+                      onClick={() => telefonuSifirla(a)}
+                      title={`Telefon kaydı: ${new Date(telefonlar.get(a.id)!).toLocaleDateString("tr-TR")}`}
+                      className="text-xs text-gray-600 border rounded-lg px-2 py-1 hover:bg-gray-50"
+                    >
+                      📱 Telefonu sıfırla
+                    </button>
+                  ) : (
+                    <span className="text-xs text-gray-400 w-[118px]">telefon yok</span>
+                  )}
                   <button
                     onClick={() => {
                       setDuzenlenen(a.id);

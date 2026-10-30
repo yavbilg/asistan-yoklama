@@ -61,10 +61,26 @@ Daha somut olan kazanır; hepsi muaf sonucu verir, yalnızca gösterilen sebep d
 - `name_aliases` — çizelgedeki yazımların asistanlara eşlenmesi
 - `used_tokens` — QR kodların tek kullanımlık olmasını sağlar
 
-## Güvenlik notları
+## QR ile katılım
 
-- QR token'ı sunucuda üretilip doğrulanır; imzalama anahtarı (`TOKEN_SECRET`)
-  tarayıcıya inmez. Her token tek kullanımlıktır ve 40 saniyede geçersizleşir.
+- QR kodu 20 saniyede bir yenilenir, HMAC-SHA256 ile imzalanır. Anahtar
+  `TOKEN_SECRET` ortam değişkeninden, yoksa veritabanında bir kez üretilen
+  değerden gelir — kodda sabit bir anahtar yoktur.
+- Kod **sayfa açılırken** doğrulanır (en fazla 60 sn); sayfaya 5 dakikalık bir
+  bilet gömülür. Yavaş açılan telefon ya da isim ararken geçen süre yoklamayı
+  düşürmez.
+- **Telefon kaydı:** bir telefon ilk yoklamada seçilen kişiye kalıcı olarak
+  bağlanır (httpOnly çerez). Sonraki derslerde isim seçmeden tek dokunuşla
+  yoklama verilir; o telefondan başka biri adına yoklama verilemez, bir isim de
+  ikinci bir telefona bağlanamaz.
+- Telefon değişirse `/asistanlar` ekranından **Telefonu sıfırla** (yönetici
+  şifresi — `ADMIN_PASSWORD` — gerekir).
+- Aynı kişi aynı derste bir kez, aynı telefon aynı derste bir kişi için yoklama
+  verebilir; bu, veritabanı kısıtlarıyla (`qr_claims`) aynı anda gelen
+  isteklerde de garanti edilir.
+- Sayfa sunucuda çizilir ve form JavaScript olmadan da çalışır.
+
+## Güvenlik notları
 - **Yönetim ekranlarında kimlik doğrulama yoktur.** `/`, `/asistanlar` ve
   `/cizelge` adresi bilen herkese açıktır; `/yoklama` sayfasındaki parola
   istemci tarafındadır ve gerçek koruma sağlamaz. Yayına almadan önce

@@ -70,10 +70,12 @@ if (people.length === 0) {
   console.log("Tohum listesi boş, aktarım atlandı.");
 } else {
   // id'ler korunuyor: geçmiş yoklama kayıtları bu id'lere bağlı.
+  // Var olan kayda DOKUNULMAZ: arayüzden düzeltilmiş isim ya da kıdem tarihi
+  // betik yeniden çalıştırıldığında tohum dosyasındaki eski değere dönmesin.
   await sql.unsafe(
     `INSERT INTO assistants (id, name, end_date)
      SELECT * FROM unnest($1::int[], $2::text[], $3::text[])
-     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, end_date = EXCLUDED.end_date`,
+     ON CONFLICT (id) DO NOTHING`,
     [people.map((p) => p.id), people.map((p) => p.name), people.map((p) => p.endDate)]
   );
 

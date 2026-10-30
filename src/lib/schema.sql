@@ -81,6 +81,41 @@ CREATE TABLE IF NOT EXISTS name_aliases (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Uygulama ayarları. QR imza anahtarı burada üretilip saklanır: TOKEN_SECRET
+-- ortam değişkeni tanımlı değilse koddaki herkese açık bir değere düşülmesin.
+CREATE TABLE IF NOT EXISTS app_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Telefon ↔ asistan eşleşmesi. Bir telefon ilk yoklamada seçilen kişiye
+-- kalıcı olarak bağlanır; bir kişiye de yalnızca bir telefon bağlanabilir.
+-- Böylece bir telefondan başkası adına yoklama verilemez.
+-- Çerezin kendisi değil SHA-256 özeti saklanır.
+CREATE TABLE IF NOT EXISTS devices (
+  id_hash      TEXT PRIMARY KEY,
+  assistant_id INTEGER NOT NULL UNIQUE REFERENCES assistants(id) ON DELETE CASCADE,
+  user_agent   TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- QR ile verilen yoklamalar. İki kısıt aynı anda gelen istekleri de
+-- veritabanı seviyesinde çözer:
+--   PRIMARY KEY        → bir kişi bir derste yalnızca bir kez
+--   UNIQUE (device)    → bir telefon bir derste yalnızca bir kişi için
+CREATE TABLE IF NOT EXISTS qr_claims (
+  session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  assistant_id INTEGER NOT NULL REFERENCES assistants(id) ON DELETE CASCADE,
+  device_hash  TEXT NOT NULL,
+  claimed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (session_id, assistant_id),
+  UNIQUE (session_id, device_hash)
+);
+
+-- ESKİ: QR token'ları kişi başına tek kullanımlıktı. Yerini qr_claims aldı;
+-- geçmiş kayıtlar için tablo yerinde bırakıldı, artık yazılmıyor.
 -- QR token'ları KİŞİ BAŞINA tek kullanımlıktır, token başına değil.
 -- Ekrandaki kodu aynı anda onlarca kişi okutur; anahtar yalnızca (token,
 -- session) olsaydı ilk okutan geçer, diğerleri "kod kullanılmış" alırdı.
