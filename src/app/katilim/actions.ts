@@ -8,9 +8,7 @@ import {
   getSession,
   listAssistants,
   hashDevice,
-  getDeviceOwner,
-  registerDevice,
-  touchDevice,
+  rememberDevice,
   getPresence,
   claimViaQr,
 } from "@/lib/db";
@@ -72,38 +70,32 @@ async function isle(form: FormData, s: string): Promise<string> {
   }
   const idHash = hashDevice(ham);
 
-  const sahip = await getDeviceOwner(idHash);
-  if (sahip && sahip.assistantId !== asistanId) {
-    // Bu telefon başka birine kayıtlı: başkası adına yoklama burada durur.
-    return hata("telefon-baskasinin");
-  }
+  // Telefon–isim eşleşmesi ARTIK KİLİT DEĞİL, yalnızca hatırlatmadır.
+  // Kalıcı bağlama denendi ve haftalık kullanımda kırıldı: çerez iki ders
+  // arasında silinince (Safari temizliği, gizli sekme, bağlantının başka bir
+  // uygulamanın içindeki tarayıcıda açılması) kişi kendi adına bir daha
+  // yoklama veremiyordu. 21 kayıtlı telefonun 14'ü böyle kilitlendi.
+  // Farklı bir isim seçilirse kayıt sessizce güncellenir.
+  const ua = (await headers()).get("user-agent") ?? "";
+  await rememberDevice(idHash, asistanId, ua);
 
-  if (!sahip) {
-    const ua = (await headers()).get("user-agent") ?? "";
-    const sonuc = await registerDevice(idHash, asistanId, ua);
-    if (sonuc === "kisi-baska-telefonda") {
-      // Aynı anda gelen ikinci istek mi? Kayıt bu kimlikle yapılmışsa sorun yok.
-      const kendisi = await getDeviceOwner(idHash);
-      if (kendisi?.assistantId !== asistanId) return hata("isim-kayitli");
-    }
-
-    if (yeniCerez) {
-      cerezler.set(CIHAZ_CEREZI, ham, {
-        httpOnly: true, // JavaScript okuyamaz, kopyalanıp başka telefona taşınamaz
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/",
-        maxAge: IKI_YIL,
-      });
-    }
+  if (yeniCerez) {
+    cerezler.set(CIHAZ_CEREZI, ham, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: IKI_YIL,
+    });
   }
 
   // Yoklaması zaten alınmışsa (QR ya da yönetici eliyle) yeniden yazma.
   if ((await getPresence(s, asistanId)) !== null) return onay;
 
   const sonuc = await claimViaQr(s, asistanId, idHash);
+  // Tek kalan sınır: bir telefon aynı derste yalnızca bir kişi için yoklama
+  // verebilir. Bu, bir kişinin arkadaşlarını da işaretlemesini engeller.
   if (!sonuc.ok && sonuc.sebep === "telefon-zaten") return hata("telefon-kullanildi");
 
-  await touchDevice(idHash);
   return onay;
 }

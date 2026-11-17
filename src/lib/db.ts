@@ -497,25 +497,23 @@ export async function boundAssistantIds(): Promise<Set<number>> {
 }
 
 /**
- * Telefonu bir kişiye bağlar. Kişi zaten başka bir telefona bağlıysa
- * UNIQUE (assistant_id) kısıtı yazmayı engeller — kontrol ve yazma tek adım.
+ * Telefonun en son hangi isimle yoklama verdiğini kaydeder — sonraki derste
+ * isim listesi yerine tek dokunuş sunabilmek için. Kilit değildir: farklı bir
+ * isim seçilirse kayıt güncellenir, aynı isim birden çok telefonda olabilir.
  */
-export async function registerDevice(
+export async function rememberDevice(
   idHash: string,
   assistantId: number,
   userAgent: string
-): Promise<"kaydedildi" | "kisi-baska-telefonda"> {
-  const rows = await sql`
+): Promise<void> {
+  await sql`
     INSERT INTO devices (id_hash, assistant_id, user_agent)
     VALUES (${idHash}, ${assistantId}, ${userAgent.slice(0, 300)})
-    ON CONFLICT DO NOTHING
-    RETURNING assistant_id
+    ON CONFLICT (id_hash) DO UPDATE SET
+      assistant_id = EXCLUDED.assistant_id,
+      user_agent   = EXCLUDED.user_agent,
+      last_used_at = now()
   `;
-  return rows.length > 0 ? "kaydedildi" : "kisi-baska-telefonda";
-}
-
-export async function touchDevice(idHash: string): Promise<void> {
-  await sql`UPDATE devices SET last_used_at = now() WHERE id_hash = ${idHash}`;
 }
 
 /**

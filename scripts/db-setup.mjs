@@ -42,6 +42,11 @@ const gocler = [
   `ALTER TABLE used_tokens ALTER COLUMN assistant_id SET NOT NULL`,
   `ALTER TABLE used_tokens DROP CONSTRAINT IF EXISTS used_tokens_pkey`,
   `ALTER TABLE used_tokens ADD PRIMARY KEY (token, session_id, assistant_id)`,
+
+  // devices.assistant_id UNIQUE idi: bir isim yalnızca bir telefona
+  // bağlanabiliyordu. Çerezini kaybeden kullanıcı kendi adına bir daha yoklama
+  // veremiyordu, bu yüzden kısıt kaldırıldı. Tablo artık yalnızca hatırlatma.
+  `ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_assistant_id_key`,
 ];
 
 for (const g of gocler) {

@@ -89,13 +89,14 @@ CREATE TABLE IF NOT EXISTS app_settings (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Telefon ↔ asistan eşleşmesi. Bir telefon ilk yoklamada seçilen kişiye
--- kalıcı olarak bağlanır; bir kişiye de yalnızca bir telefon bağlanabilir.
--- Böylece bir telefondan başkası adına yoklama verilemez.
+-- Telefonun en son hangi isimle yoklama verdiği. Yalnızca HATIRLATMA içindir:
+-- sonraki derste isim listesi yerine tek dokunuş sunmak için. Kilit değildir.
+-- (Kalıcı bağlama denendi; çerez iki ders arasında silinen kullanıcılar kendi
+-- adlarına yoklama veremez hâle geldi, bu yüzden kaldırıldı.)
 -- Çerezin kendisi değil SHA-256 özeti saklanır.
 CREATE TABLE IF NOT EXISTS devices (
   id_hash      TEXT PRIMARY KEY,
-  assistant_id INTEGER NOT NULL UNIQUE REFERENCES assistants(id) ON DELETE CASCADE,
+  assistant_id INTEGER NOT NULL REFERENCES assistants(id) ON DELETE CASCADE,
   user_agent   TEXT,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_used_at TIMESTAMPTZ NOT NULL DEFAULT now()

@@ -6,7 +6,7 @@ import {
   hashDevice,
   getDeviceOwner,
   getPresence,
-  boundAssistantIds,
+
 } from "@/lib/db";
 import { validateToken, mintTicket } from "@/lib/token";
 import { CIHAZ_CEREZI } from "@/lib/cihaz";
@@ -29,9 +29,6 @@ const HATALAR: Record<string, string> = {
   bilet: "Sayfa çok uzun açık kaldı. Ekrandaki QR kodu tekrar okutun.",
   "oturum-yok": "Bu yoklama oturumu bulunamadı.",
   "oturum-kapali": "Bu yoklama oturumu kapanmış.",
-  "telefon-baskasinin": "Bu telefon başka bir asistan adına kayıtlı.",
-  "isim-kayitli":
-    "Bu isim başka bir telefona kayıtlı. Telefonunuz değiştiyse yoklama sorumlusundan kaydı sıfırlamasını isteyin.",
   "telefon-kullanildi": "Bu telefondan bu derste zaten yoklama verildi.",
   sunucu: "Bir hata oluştu. Ekrandaki QR kodu tekrar okutup deneyin.",
 };
@@ -142,7 +139,11 @@ export default async function KatilimPage({
   const s = tek(p.s);
   const t = tek(p.t);
   const hata = tek(p.hata);
-  const secim = Number(tek(p.secim));
+  // secim parametresi varsa kullanıcı isim seçmek istiyor demektir; hatırlanan
+  // isimle gelen tek dokunuşluk ekran atlanır ("Ben değilim" bağlantısı).
+  const secimHam = tek(p.secim);
+  const secimVar = secimHam !== "";
+  const secim = Number(secimHam);
 
   if (!s) {
     return (
@@ -178,8 +179,10 @@ export default async function KatilimPage({
   const ham = (await cookies()).get(CIHAZ_CEREZI)?.value;
   const sahip = ham ? await getDeviceOwner(hashDevice(ham)) : null;
 
-  // Yoklaması alınmışsa QR'a bakmadan onay göster.
-  if (sahip) {
+  // Hatırlanan kişinin yoklaması alınmışsa QR'a bakmadan onay göster.
+  // Kullanıcı isim seçmek istediyse (secim) bu kısayol atlanır — telefon
+  // başkasının eline geçmiş ya da yanlış isim hatırlanmış olabilir.
+  if (sahip && !secimVar) {
     const ne = await getPresence(s, sahip.assistantId);
     if (ne !== null) {
       return (
@@ -220,57 +223,41 @@ export default async function KatilimPage({
   const bilet = await mintTicket(s);
   const temelAdres = `/katilim?${new URLSearchParams({ s, t })}`;
 
-  // Kayıtlı telefon: liste yok, tek düğme.
-  if (sahip) {
+  // Hatırlanan isim varsa liste yerine tek düğme. Kullanıcı isim değiştirmek
+  // isterse (secim parametresi) bu ekran atlanır.
+  if (sahip && !secimVar) {
     return (
       <Kabuk>
         {baslik}
         <HataKutusu kod={hata} />
         <div className="bg-white rounded-2xl p-6 border text-center">
-          <p className="text-gray-500 text-sm mb-1">Bu telefon kayıtlı:</p>
           <p className="text-xl font-semibold text-gray-900 mb-5">{sahip.name}</p>
           <KatilimFormu s={s} t={t} bilet={bilet} asistanId={sahip.assistantId} dugme="Derste Varım" />
-          <p className="text-xs text-gray-400 mt-4">
-            Bu siz değilseniz yoklama sorumlusuna haber verin.
-          </p>
+          <a href={`${temelAdres}&secim=0`} className="block mt-4 text-sm text-gray-500 underline">
+            Ben değilim, isim seç
+          </a>
         </div>
       </Kabuk>
     );
   }
 
-  const [asistanlar, kayitlilar] = await Promise.all([listAssistants(), boundAssistantIds()]);
+  const asistanlar = await listAssistants();
 
-  // İlk kez kullanılan telefon, isim seçilmiş: onay ekranı.
+  // İsim seçilmiş: onay ekranı.
   const secilen = asistanlar.find((a) => a.id === secim);
   if (secilen) {
-    if (kayitlilar.has(secilen.id)) {
-      return (
-        <Kabuk>
-          {baslik}
-          <HataKutusu kod="isim-kayitli" />
-          <a href={temelAdres} className="block text-center text-sm text-gray-600 underline">
-            Geri
-          </a>
-        </Kabuk>
-      );
-    }
     return (
       <Kabuk>
         {baslik}
         <HataKutusu kod={hata} />
         <div className="bg-white rounded-2xl p-6 border text-center">
-          <p className="text-xl font-semibold text-gray-900 mb-3">{secilen.name}</p>
-          <p className="text-sm text-gray-600 mb-5">
-            Bu telefon <b>{secilen.name}</b> adına kaydedilecek. Sonraki derslerde isim
-            seçmeden tek dokunuşla yoklama verirsiniz. Bu telefondan başka biri adına
-            yoklama verilemez.
-          </p>
+          <p className="text-xl font-semibold text-gray-900 mb-5">{secilen.name}</p>
           <KatilimFormu
             s={s}
             t={t}
             bilet={bilet}
             asistanId={secilen.id}
-            dugme="Kaydol ve Derste Varım"
+            dugme="Derste Varım"
             aday={randomBytes(32).toString("base64url")}
           />
           <a href={temelAdres} className="block mt-4 text-sm text-gray-500 underline">
@@ -281,18 +268,15 @@ export default async function KatilimPage({
     );
   }
 
-  // İlk kez kullanılan telefon: isim listesi.
   const kisiler = asistanlar
-    .map((a) => ({ id: a.id, name: a.name, kayitli: kayitlilar.has(a.id) }))
+    .map((a) => ({ id: a.id, name: a.name }))
     .sort((x, y) => x.name.localeCompare(y.name, "tr"));
 
   return (
     <Kabuk>
       {baslik}
       <HataKutusu kod={hata} />
-      <p className="text-sm text-gray-600 mb-3">
-        İlk kullanım: adınızı seçin. Telefonunuz bu isme kaydedilecek.
-      </p>
+      <p className="text-sm text-gray-600 mb-3">Adınızı seçin.</p>
       <IsimListesi kisiler={kisiler} temelAdres={temelAdres} />
     </Kabuk>
   );
